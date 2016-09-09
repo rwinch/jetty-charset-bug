@@ -1,0 +1,87 @@
+= Introduction
+
+There is an inconsistency in how Jetty's `DefaultServlet` adds a charset. Specifically:
+
+
+[source,java]
+----
+response = new HttpServletResponseWrapper((HttpServletResponse) response);
+response.setLocale(Locale.US);
+chain.doFilter(request, response);
+----
+
+produces
+
+[source,http]
+----
+Content-Type: text/html;charset=iso-8859-1
+----
+
+However, the following:
+
+[source,java]
+----
+// do not wrap the response
+response.setLocale(Locale.US);
+chain.doFilter(request, response);
+----
+
+produces
+
+[source,http]
+----
+Content-Type: text/html
+----
+
+= Short Analysis
+
+If a `HttpServletResponseWrapper` is used, then
+`response instanceof Response` in `DefaultServlet` returns false
+(https://github.com/eclipse/jetty.project/blob/68340a94d003ebd79a8a8e21f5e3207b5bc16fec/jetty-servlet/src/main/java/org/eclipse/jetty/servlet/DefaultServlet.java#L1088[source]).
+However, if `HttpServletResponseWrapper` is not used, it returns true.
+
+[source,java]
+----
+protected void putHeaders(HttpServletResponse response,HttpContent content, long contentLength)
+    {
+        if (response instanceof Response)
+        {
+            Response r = (Response)response;
+            r.putHeaders(content,contentLength,_etags);
+            HttpFields f = r.getHttpFields();
+            if (_acceptRanges)
+                f.put(ACCEPT_RANGES);
+
+            if (_cacheControl!=null)
+                f.put(_cacheControl);
+        }
+        else
+        {
+            Response.putHeaders(response,content,contentLength,_etags);
+            if (_acceptRanges)
+                response.setHeader(ACCEPT_RANGES.getName(),ACCEPT_RANGES.getValue());
+
+            if (_cacheControl!=null)
+                response.setHeader(_cacheControl.getName(),_cacheControl.getValue());
+        }
+    }
+----
+
+= Sample
+
+You can find a complete sample with a JUnit test that demonstrates the
+issue at
+https://github.com/rwinch/jetty-charset-bug[rwinch/jetty-charset-bug].
+You can run the sample by importing it into your IDE as a Maven project or using:
+
+[source,bash]
+----
+$ ./mvnw verify
+----
+
+= Credits
+
+This issue was originally reported to the Spring Framework via
+https://jira.spring.io/browse/SPR-14673[SPR-14673] via https://github.com/diogosantana[@diogosantana].
+Much of the source code is written by https://github.com/diogosantana[@diogosantana]. I have simplified
+the sample to contain no Spring dependencies and isolate the problem.
